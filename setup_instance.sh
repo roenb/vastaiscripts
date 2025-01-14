@@ -4,27 +4,31 @@
 LIBRECHAT_DIR="/app/librechat"
 LOG_DIR="/app/logs"
 MODEL_DIR="/app/models"
-NODE_VERSION="18" # Specify the Node.js version to install
+LIBRECHAT_SETTINGS_FILE="$LIBRECHAT_DIR/config/settings.json"
+DEFAULT_USER_EMAIL=${DEFAULT_USER_EMAIL:-"admin@librechat.com"}
+DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:-"admin123"}
+MODEL_URL="https://huggingface.co/lmstudio-community/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q8_0.gguf"
+LIBRECHAT_PORT=${LIBRECHAT_PORT:-3000}
 mkdir -p "$LOG_DIR" "$MODEL_DIR" "$LIBRECHAT_DIR" "/app/config"
 
 log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_DIR/setup.log"; }
 
-log "Setting up instance..."
+log "Starting setup process..."
+
+# Install necessary tools
 apt-get update && apt-get upgrade -y
-apt-get install -y python3-pip python3-dev build-essential nvidia-cuda-toolkit curl git
+apt-get install -y python3-pip python3-dev build-essential nvidia-cuda-toolkit curl git nodejs npm
 
-# Install Node.js
-log "Installing Node.js v$NODE_VERSION..."
-curl -fsSL https://deb.nodesource.com/setup_$NODE_VERSION.x | bash -
-apt-get install -y nodejs
-log "Node.js version installed: $(node -v)"
+# Install Python dependencies
+log "Installing Python dependencies..."
+pip3 install --no-cache-dir torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 \
+    transformers==4.36.2 huggingface_hub>=0.19.3,<1.0
 
-# Remove existing installations to prevent conflicts
-pip3 uninstall -y torch torchvision torchaudio vllm transformers llama-cpp-python
-
-# Install specific versions known to work together
-pip3 install --no-cache-dir torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 transformers==4.36.2 \
-    vllm==0.2.7 llama-cpp-python==0.1.77 huggingface_hub==0.17.1
+# Ensure huggingface-cli is available
+if ! command -v huggingface-cli &>/dev/null; then
+    log "huggingface-cli not found. Check your Python environment."
+    exit 1
+fi
 
 # Detect GPUs and configure parallelism
 GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
@@ -41,10 +45,49 @@ echo "$HUGGINGFACE_TOKEN" | huggingface-cli login --token
 
 # Clone LibreChat repository
 log "Cloning LibreChat repository..."
-git clone https://github.com/danny-avila/LibreChat.git "$LIBRECHAT_DIR" || { log "Failed to clone LibreChat."; exit 1; }
+if [ -d "$LIBRECHAT_DIR" ]; then
+    log "Existing LibreChat directory found. Removing..."
+    rm -rf "$LIBRECHAT_DIR"
+fi
+
+if git clone https://github.com/danny-avila/LibreChat.git "$LIBRECHAT_DIR"; then
+    log "Successfully cloned LibreChat."
+else
+    log "Failed to clone LibreChat."; exit 1;
+fi
 
 # Install LibreChat dependencies
 log "Installing LibreChat dependencies..."
 cd "$LIBRECHAT_DIR"
-npm install
-log "Setup complete."
+npm install || { log "Failed to install LibreChat dependencies."; exit 1; }
+
+# Configure LibreChat settings
+log "Configuring LibreChat settings..."
+cat > "$LIBRECHAT_SETTINGS_FILE" <<EOL
+{
+  "defaultUser": {
+    "email": "$DEFAULT_USER_EMAIL",
+    "password": "$DEFAULT_USER_PASSWORD"
+  },
+  "modelPath": "$MODEL_DIR/Llama-3.3-70B-Instruct-Q8_0.gguf",
+  "serverPort": $LIBRECHAT_PORT
+}
+EOL
+log "LibreChat configuration updated: $LIBRECHAT_SETTINGS_FILE"
+
+# Download the model
+log "Downloading LLaMA model..."
+if [ ! -f "$MODEL_DIR/Llama-3.3-70B-Instruct-Q8_0.gguf" ]; then
+    wget -q --show-progress -P "$MODEL_DIR" "$MODEL_URL" || { log "Failed to download the model."; exit 1; }
+    log "Model downloaded successfully."
+else
+    log "Model already exists. Skipping download."
+fi
+
+# Restart LibreChat to apply settings
+log "Restarting LibreChat..."
+pkill -f "npm start" || log "No existing LibreChat process found."
+nohup npm start -- --port $LIBRECHAT_PORT > "$LOG_DIR/librechat_$(date +'%Y%m%d_%H%M%S').log" 2>&1 &
+log "LibreChat restarted on port $LIBRECHAT_PORT."
+
+log "Setup complete. Default user: $DEFAULT_USER_EMAIL / $DEFAULT_USER_PASSWORD"
