@@ -1,0 +1,9 @@
+HUGGINGFACE_TOKEN=<your-huggingface-token>
+DEFAULT_USER_EMAIL=admin@librechat.com
+DEFAULT_USER_PASSWORD=admin123
+LIBRECHAT_PORT=3000
+VLLM_PORT=8082
+TENSOR_PARALLEL_SIZE=1
+MODEL_URL=https://huggingface.co/lmstudio-community/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q8_0.gguf
+REPO_URL=https://github.com/danny-avila/LibreChat.git
+LIBRECHAT_SETTINGS_FILE=/app/librechat/config/settings.json
