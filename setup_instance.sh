@@ -4,15 +4,25 @@
 LIBRECHAT_DIR="/app/librechat"
 LOG_DIR="/app/logs"
 MODEL_DIR="/app/models"
+NODE_VERSION="18" # Specify the Node.js version to install
 mkdir -p "$LOG_DIR" "$MODEL_DIR" "$LIBRECHAT_DIR" "/app/config"
 
 log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_DIR/setup.log"; }
 
 log "Setting up instance..."
 apt-get update && apt-get upgrade -y
-apt-get install -y python3-pip python3-dev build-essential nvidia-cuda-toolkit nodejs npm
+apt-get install -y python3-pip python3-dev build-essential nvidia-cuda-toolkit curl git
 
-# Install dependencies
+# Install Node.js
+log "Installing Node.js v$NODE_VERSION..."
+curl -fsSL https://deb.nodesource.com/setup_$NODE_VERSION.x | bash -
+apt-get install -y nodejs
+log "Node.js version installed: $(node -v)"
+
+# Remove existing installations to prevent conflicts
+pip3 uninstall -y torch torchvision torchaudio vllm transformers llama-cpp-python
+
+# Install specific versions known to work together
 pip3 install --no-cache-dir torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 transformers==4.36.2 \
     vllm==0.2.7 llama-cpp-python==0.1.77 huggingface_hub==0.17.1
 
@@ -37,5 +47,4 @@ git clone https://github.com/danny-avila/LibreChat.git "$LIBRECHAT_DIR" || { log
 log "Installing LibreChat dependencies..."
 cd "$LIBRECHAT_DIR"
 npm install
-
 log "Setup complete."
