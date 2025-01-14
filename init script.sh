@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-REPO_URL="git@github.com:roenb/vastaiscripts.git"
+REPO_URL="https://github.com/roenb/vastaiscripts.git"
 CLONE_DIR="/app/vastaiscripts"
 LOG_DIR="/app/logs"
 FULL_SCRIPT="setup_instance.sh" # Replace with the desired script name
