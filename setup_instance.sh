@@ -8,14 +8,16 @@ LIBRECHAT_SETTINGS_FILE="$LIBRECHAT_DIR/config/settings.json"
 DEFAULT_USER_EMAIL=${DEFAULT_USER_EMAIL:-"admin@librechat.com"}
 DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:-"admin123"}
 LIBRECHAT_PORT=${LIBRECHAT_PORT:-3000}
-PYTHON_SCRIPT_PATH="/app/vastaiscripts/download_models.py"
+MODELS_LIST=${MODELS_LIST:-"lmstudio-community/Llama-3.3-70B-Instruct-GGUF"}
+QUANTIZATION=${QUANTIZATION:-"Q8_0"}
 HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-""}
+ALLOW_GPU_OVERCOMMIT=${ALLOW_GPU_OVERCOMMIT:-false}
 
 mkdir -p "$LOG_DIR" "$MODEL_DIR" "$LIBRECHAT_DIR" "/app/config"
 
 log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_DIR/setup.log"; }
 
-log "Starting setup process..."
+log "Starting dynamic multi-model, multi-GPU setup process..."
 
 # Install necessary tools
 log "Installing system tools..."
@@ -24,8 +26,7 @@ apt-get install -y python3-pip python3-dev build-essential nvidia-cuda-toolkit c
 
 # Install Python dependencies
 log "Installing Python dependencies..."
-pip3 install --no-cache-dir torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 \
-    transformers==4.36.2 huggingface-hub==0.19.3 || { log "Failed to install Python dependencies."; exit 1; }
+pip3 install --no-cache-dir torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 huggingface-hub==0.19.3 || { log "Failed to install Python dependencies."; exit 1; }
 
 # Ensure huggingface-cli is available
 log "Checking for Hugging Face CLI..."
@@ -43,30 +44,88 @@ if [[ -z "$HUGGINGFACE_TOKEN" ]]; then
 fi
 echo "$HUGGINGFACE_TOKEN" | huggingface-cli login --token || { log "Failed to authenticate with Hugging Face."; exit 1; }
 
-# Detect GPUs and configure parallelism
+# Detect GPUs and VRAM
 GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 log "Detected $GPU_COUNT GPU(s)."
-export TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-$GPU_COUNT}"
 
-# Clone the Vast.ai scripts repository (if needed)
-REPO_URL="https://github.com/roenb/vastaiscripts.git"
-SCRIPTS_DIR="/app/vastaiscripts"
-if [ ! -d "$SCRIPTS_DIR" ]; then
-    log "Cloning Vast.ai scripts repository..."
-    if git clone "$REPO_URL" "$SCRIPTS_DIR"; then
-        log "Successfully cloned Vast.ai scripts repository."
+GPU_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | awk '{SUM+=$1} END {print SUM}')
+log "Total GPU VRAM available: ${GPU_VRAM}MB"
+
+# Parse MODELS_LIST and download models
+log "Parsing models list..."
+IFS=',' read -r -a MODELS <<< "$MODELS_LIST"
+
+for MODEL in "${MODELS[@]}"; do
+    # Extract repo and quantization
+    if [[ $MODEL == *":"* ]]; then
+        REPO_ID=$(echo "$MODEL" | cut -d':' -f1)
+        MODEL_QUANT=$(echo "$MODEL" | cut -d':' -f2)
     else
-        log "Failed to clone Vast.ai scripts repository."; exit 1;
+        REPO_ID=$MODEL
+        MODEL_QUANT=$QUANTIZATION
+    fi
+
+    log "Processing model: $REPO_ID with quantization: $MODEL_QUANT"
+
+    # Fetch all relevant files
+    MODEL_FILES=$(python3 - <<EOF
+from huggingface_hub import hf_hub_list
+repo_id = "$REPO_ID"
+quant_level = "$MODEL_QUANT"
+files = hf_hub_list(repo_id)
+filtered_files = [f.rfilename for f in files if quant_level in f.rfilename]
+print(",".join(filtered_files))
+EOF
+)
+
+    IFS=',' read -r -a FILES <<< "$MODEL_FILES"
+    for FILE in "${FILES[@]}"; do
+        log "Downloading $FILE..."
+        python3 -m huggingface_hub.cli.hf_hub_download --repo-id "$REPO_ID" --filename "$FILE" --local-dir "$MODEL_DIR/$REPO_ID" || {
+            log "Failed to download $FILE for $REPO_ID"; exit 1;
+        }
+    done
+
+    log "Successfully downloaded all files for $REPO_ID"
+done
+
+# Determine deployment strategy
+TOTAL_MODEL_SIZE=$(du -sm "$MODEL_DIR" | awk '{print $1}')
+log "Total model size: ${TOTAL_MODEL_SIZE}MB"
+
+if [[ $TOTAL_MODEL_SIZE -le $GPU_VRAM ]]; then
+    if [[ $GPU_COUNT -eq 1 ]]; then
+        log "Use case: Single GPU, single model."
+        export TENSOR_PARALLEL_SIZE=1
+    else
+        log "Use case: Multi-GPU, single model split across GPUs."
+        export TENSOR_PARALLEL_SIZE=$GPU_COUNT
     fi
 else
-    log "Vast.ai scripts repository already exists. Skipping clone."
+    log "Use case: Multiple small models across GPUs."
+    export TENSOR_PARALLEL_SIZE=1
 fi
 
-# Download the models using Python script
-log "Downloading models using Python script..."
-python3 "$PYTHON_SCRIPT_PATH" || { log "Failed to download models."; exit 1; }
+# Start the model server
+log "Starting model server..."
+nohup python3 -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 --port $LIBRECHAT_PORT \
+    --model-dir "$MODEL_DIR" \
+    --tensor-parallel-size $TENSOR_PARALLEL_SIZE \
+    --max-num-batched-tokens 8192 \
+    --max-num-seqs 16 > "$LOG_DIR/model_server_$(date +'%Y%m%d_%H%M%S').log" 2>&1 &
+SERVER_PID=$!
 
-# Clone LibreChat repository
+# Verify the server launch
+sleep 5
+if ps -p $SERVER_PID > /dev/null; then
+    log "Model server started successfully on port $LIBRECHAT_PORT using $TENSOR_PARALLEL_SIZE GPUs."
+else
+    log "Model server failed to start. Check logs at $LOG_DIR/model_server_$(date +'%Y%m%d_%H%M%S').log."
+    exit 1
+fi
+
+# Clone and configure LibreChat
 log "Cloning LibreChat repository..."
 if [ -d "$LIBRECHAT_DIR" ]; then
     log "Existing LibreChat directory found. Removing..."
@@ -79,12 +138,11 @@ else
     log "Failed to clone LibreChat."; exit 1;
 fi
 
-# Install LibreChat dependencies
 log "Installing LibreChat dependencies..."
 cd "$LIBRECHAT_DIR"
 npm install || { log "Failed to install LibreChat dependencies."; exit 1; }
 
-# Configure LibreChat settings
+# Configure LibreChat default user
 log "Configuring LibreChat settings..."
 cat > "$LIBRECHAT_SETTINGS_FILE" <<EOL
 {
@@ -92,22 +150,21 @@ cat > "$LIBRECHAT_SETTINGS_FILE" <<EOL
     "email": "$DEFAULT_USER_EMAIL",
     "password": "$DEFAULT_USER_PASSWORD"
   },
-  "modelPath": "$MODEL_DIR/Llama-3.3-70B-Instruct-Q8_0-00001-of-00002.gguf",
+  "modelPath": "$MODEL_DIR",
   "serverPort": $LIBRECHAT_PORT
 }
 EOL
 log "LibreChat configuration updated: $LIBRECHAT_SETTINGS_FILE"
 
-# Restart LibreChat to apply settings
-log "Restarting LibreChat..."
-pkill -f "npm start" || log "No existing LibreChat process found."
+# Start LibreChat
+log "Starting LibreChat..."
 nohup npm start -- --port $LIBRECHAT_PORT > "$LOG_DIR/librechat_$(date +'%Y%m%d_%H%M%S').log" 2>&1 &
 LIBRECHAT_PID=$!
 
-# Verify LibreChat restart
+# Verify LibreChat launch
 sleep 5
 if ps -p $LIBRECHAT_PID > /dev/null; then
-    log "LibreChat restarted successfully on port $LIBRECHAT_PORT."
+    log "LibreChat started successfully on port $LIBRECHAT_PORT."
 else
     log "LibreChat failed to start. Check logs at $LOG_DIR/librechat_$(date +'%Y%m%d_%H%M%S').log."
     exit 1

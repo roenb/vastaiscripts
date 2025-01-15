@@ -1,9 +1,108 @@
+Updated Environment Variables
+
+Here’s the updated list of environment variables, including new ones for controlling model distribution:
 HUGGINGFACE_TOKEN=<your-huggingface-token>
 DEFAULT_USER_EMAIL=admin@librechat.com
 DEFAULT_USER_PASSWORD=admin123
 LIBRECHAT_PORT=3000
 VLLM_PORT=8082
-TENSOR_PARALLEL_SIZE=1
-MODEL_URL=https://huggingface.co/lmstudio-community/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q8_0.gguf
-REPO_URL=https://github.com/danny-avila/LibreChat.git
+TENSOR_PARALLEL_SIZE=4
+MODEL_REPO_ID=lmstudio-community/Llama-3.3-70B-Instruct-GGUF
+QUANTIZATION=Q8_0
+MODEL_DISTRIBUTION_MODE=auto
+MODEL_ASSIGNMENT_MODE=balanced
+MAX_MODELS_PER_GPU=1
+MIN_GPU_VRAM_REQUIRED=40000
+ALLOW_GPU_OVERCOMMIT=false
 LIBRECHAT_SETTINGS_FILE=/app/librechat/config/settings.json
+LOG_LEVEL=info
+
+MultiModel
+
+HUGGINGFACE_TOKEN=<your-huggingface-token>
+DEFAULT_USER_EMAIL=admin@librechat.com
+DEFAULT_USER_PASSWORD=admin123
+LIBRECHAT_PORT=3000
+VLLM_PORT=8082
+TENSOR_PARALLEL_SIZE=4
+MODELS_LIST=lmstudio-community/Llama-3.3-70B-Instruct-GGUF:8,city96/AnotherModel:4,openlm-research/phi-4
+QUANTIZATION=Q8_0
+ALLOW_GPU_OVERCOMMIT=false
+LOG_LEVEL=info
+
+
+HUGGINGFACE_TOKEN=<your-huggingface-token>           # Token for Hugging Face authentication
+DEFAULT_USER_EMAIL=admin@librechat.com               # Default LibreChat user email
+DEFAULT_USER_PASSWORD=admin123                       # Default LibreChat user password
+LIBRECHAT_PORT=3000                                  # Base port for LibreChat
+VLLM_PORT=8082                                       # Port for the vLLM server
+TENSOR_PARALLEL_SIZE=4                               # Number of GPUs to use for tensor parallelism
+MODEL_REPO_ID=lmstudio-community/Llama-3.3-70B-Instruct-GGUF  # Hugging Face repo ID for the model
+QUANTIZATION=Q8_0                                    # Quantization level of the model
+MODEL_DISTRIBUTION_MODE=auto                         # Distribution mode: auto | single | multi
+MODEL_ASSIGNMENT_MODE=balanced                       # Assignment mode for multiple models: balanced | manual
+MAX_MODELS_PER_GPU=2                                 # Maximum number of smaller models per GPU
+MIN_GPU_VRAM_REQUIRED=40000                          # Minimum GPU VRAM (in MB) required for a single model
+ALLOW_GPU_OVERCOMMIT=true                            # Whether to allow multiple large models to share GPUs
+LIBRECHAT_SETTINGS_FILE=/app/librechat/config/settings.json  # LibreChat settings file path
+LOG_LEVEL=info                                       # Log level for setup and runtime (e.g., debug, info, error)
+
+Explanation of New Environment Variables
+
+    MODEL_DISTRIBUTION_MODE:
+        auto: Automatically determines how to distribute the model(s) based on GPU availability and VRAM.
+        single: Forces the model to launch on a single GPU if it fits.
+        multi: Forces splitting the model across multiple GPUs.
+
+    MODEL_ASSIGNMENT_MODE:
+        balanced: Distributes multiple smaller models evenly across GPUs.
+        manual: Requires explicit mapping of models to GPUs (e.g., using additional configuration files).
+
+    MAX_MODELS_PER_GPU:
+        Specifies the maximum number of smaller models that can be assigned to a single GPU.
+
+    MIN_GPU_VRAM_REQUIRED:
+        Minimum VRAM (in MB) required to load a single large model. If the available VRAM is below this threshold, the setup fails with an error.
+
+    ALLOW_GPU_OVERCOMMIT:
+        true: Allows overcommitting GPUs (e.g., running multiple large models on one GPU).
+        false: Restricts to one large model per GPU.
+
+    LOG_LEVEL:
+        Controls the verbosity of the logs (e.g., debug, info, error).
+
+How These Variables Work
+
+    Dynamic Model Distribution:
+        MODEL_DISTRIBUTION_MODE and MODEL_ASSIGNMENT_MODE control whether models are distributed across GPUs automatically or manually.
+        MAX_MODELS_PER_GPU prevents overloading GPUs with too many smaller models.
+
+    GPU Resource Checks:
+        Before launching, the script checks MIN_GPU_VRAM_REQUIRED and either distributes the model or raises an error.
+
+    Flexibility for Use Cases:
+        Adjusting TENSOR_PARALLEL_SIZE and MODEL_DISTRIBUTION_MODE enables support for scenarios like:
+            Single model across all GPUs.
+            Multiple models per GPU.
+            Dynamic decisions based on available VRAM.
+
+    Logging and Debugging:
+        The LOG_LEVEL variable ensures only relevant information is logged during setup and runtime.
+
+Example Scenarios
+1. Single Model on a Single GPU
+
+MODEL_DISTRIBUTION_MODE=single
+TENSOR_PARALLEL_SIZE=1
+
+2. Single Model Across Multiple GPUs
+
+MODEL_DISTRIBUTION_MODE=multi
+TENSOR_PARALLEL_SIZE=4
+
+3. Multiple Small Models on GPUs
+
+MODEL_DISTRIBUTION_MODE=auto
+MODEL_ASSIGNMENT_MODE=balanced
+MAX_MODELS_PER_GPU=2
+
