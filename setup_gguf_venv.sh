@@ -12,7 +12,7 @@ fi
 # Create directory structure
 SETUP_DIR="/app/llm-setup"
 echo "Creating directory structure in $SETUP_DIR"
-mkdir -p "$SETUP_DIR"/{models,logs}
+mkdir -p "$SETUP_DIR/models" "$SETUP_DIR/logs"
 
 # Ensure correct ownership
 if [ "$EUID" -eq 0 ]; then
@@ -48,7 +48,13 @@ fi
 echo "Downloading Qwen 2.5 3B GGUF model..."
 cd "$SETUP_DIR/models"
 if [ ! -f qwen2.5-3b-instruct-q8_0.gguf ]; then
-    wget https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q8_0.gguf
+    wget -O qwen2.5-3b-instruct-q8_0.gguf https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q8_0.gguf
+    if [ $? -ne 0 ]; then
+        echo "Error downloading Qwen model. Please check the URL or your internet connection."
+        exit 1
+    fi
+else
+    echo "Model file already exists. Skipping download."
 fi
 
 # Remove existing virtual environment if it exists
