@@ -19,45 +19,21 @@ if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
 fi
 
-# Function to get memory information in MB
-get_memory_info() {
-    total_mem=$(free -m | awk '/^Mem:/ {print $2}')
-    available_mem=$(free -m | awk '/^Mem:/ {print $7}')
-    echo "$total_mem $available_mem"
-}
-
-# Get memory values
-read total_mem available_mem <<< $(get_memory_info)
-
-# Log memory information
-echo "System Memory Information:"
-echo "Total Memory: ${total_mem}MB"
-echo "Available Memory: ${available_mem}MB"
-
 # Install required packages
 echo "Installing required packages..."
-if [ "$EUID" -eq 0 ]; then
-    apt-get update
-    apt-get install -y python3-pip python3-venv wget
-else
-    sudo apt-get update
-    sudo apt-get install -y python3-pip python3-venv wget
-fi
+apt-get update
+apt-get install -y python3-pip python3-venv wget || { echo "Package installation failed"; exit 1; }
 
 # Download the Qwen model
 echo "Downloading Qwen 2.5 3B GGUF model..."
 cd "$SETUP_DIR/models"
 if [ ! -f qwen2.5-3b-instruct-q8_0.gguf ]; then
-    wget -O qwen2.5-3b-instruct-q8_0.gguf https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q8_0.gguf
-    if [ $? -ne 0 ]; then
-        echo "Error downloading Qwen model. Please check the URL or your internet connection."
-        exit 1
-    fi
+    wget -O qwen2.5-3b-instruct-q8_0.gguf https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q8_0.gguf || { echo "Model download failed"; exit 1; }
 else
     echo "Model file already exists. Skipping download."
 fi
 
-# Remove existing virtual environment if it exists
+# Remove existing virtual environment
 echo "Cleaning up existing virtual environment..."
 if [ -d "$SETUP_DIR/venv" ]; then
     rm -rf "$SETUP_DIR/venv"
@@ -65,12 +41,12 @@ fi
 
 # Create Python virtual environment
 echo "Creating Python virtual environment..."
-python3 -m venv "$SETUP_DIR/venv"
+python3 -m venv "$SETUP_DIR/venv" || { echo "Failed to create virtual environment"; exit 1; }
 source "$SETUP_DIR/venv/bin/activate"
 
 # Install Python dependencies
 pip install --upgrade pip
-pip install fastapi uvicorn pydantic llama-cpp-python pyjwt
+pip install fastapi uvicorn pydantic llama-cpp-python pyjwt || { echo "Failed to install dependencies"; exit 1; }
 
 # Generate a default token and save it to oauth_tokens.txt
 generate_default_token() {
@@ -79,7 +55,6 @@ generate_default_token() {
     echo "$default_token" > "$SETUP_DIR/oauth_tokens.txt"
     echo "Default OAuth token generated and saved to $SETUP_DIR/oauth_tokens.txt"
 }
-
 generate_default_token
 
 # Create main Python script
@@ -180,7 +155,10 @@ if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
 fi
 
-# Start the Python server directly
+# Start the Python server
 echo "Starting the LLM server..."
+cd "$SETUP_DIR"
+export PYTHONPATH="/app/llm-setup"
 source "$SETUP_DIR/venv/bin/activate"
-exec uvicorn main:app --host 0.0.0.0 --port 22542
+echo "Current working directory: $(pwd)"
+exec uvicorn main:app --host 0.0.0.0 --port 22542 > "$SETUP_DIR/logs/server.log" 2>&1
