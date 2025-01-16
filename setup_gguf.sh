@@ -10,7 +10,7 @@ else
 fi
 
 # Create directory structure
-SETUP_DIR="$USER_HOME/llm-setup"
+SETUP_DIR="/app/llm-setup"
 echo "Creating directory structure in $SETUP_DIR"
 mkdir -p "$SETUP_DIR"/{models,logs,scripts}
 
