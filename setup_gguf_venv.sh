@@ -83,7 +83,7 @@ from datetime import datetime, timedelta
 import jwt
 
 # Ensure logs directory exists
-LOG_DIR = "logs"
+LOG_DIR = "/app/llm-setup/logs"
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
@@ -91,7 +91,7 @@ if not os.path.exists(LOG_DIR):
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
 TOKEN_EXPIRATION_MINUTES = 30
-TOKEN_FILE = "oauth_tokens.txt"
+TOKEN_FILE = "/app/llm-setup/oauth_tokens.txt"
 
 def save_token(token):
     with open(TOKEN_FILE, "a") as file:
@@ -122,7 +122,11 @@ logging.basicConfig(
 
 app = FastAPI()
 
-MODEL_PATH = "models/qwen2.5-3b-instruct-q8_0.gguf"
+MODEL_PATH = "/app/llm-setup/models/qwen2.5-3b-instruct-q8_0.gguf"
+if not os.path.exists(MODEL_PATH):
+    logging.error(f"Model file not found at {MODEL_PATH}")
+    raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
+
 try:
     model = Llama(
         model_path=MODEL_PATH,
@@ -166,5 +170,7 @@ if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
 fi
 
-echo "Setup complete! To start the service, run:"
-echo "source $SETUP_DIR/venv/bin/activate && python3 $SETUP_DIR/main.py"
+# Start the Python server directly
+echo "Starting the LLM server..."
+source "$SETUP_DIR/venv/bin/activate"
+exec python3 "$SETUP_DIR/main.py"
