@@ -70,6 +70,11 @@ from llama_cpp import Llama
 from datetime import datetime, timedelta
 import jwt
 
+# Ensure logs directory exists
+LOG_DIR = "logs"
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
+
 # JWT Config
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
@@ -98,7 +103,7 @@ def create_token():
 
 # Configure logging
 logging.basicConfig(
-    filename='logs/llm_api.log',
+    filename=os.path.join(LOG_DIR, 'llm_api.log'),
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
