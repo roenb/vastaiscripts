@@ -72,6 +72,16 @@ source "$SETUP_DIR/venv/bin/activate"
 pip install --upgrade pip
 pip install fastapi uvicorn pydantic llama-cpp-python pyjwt
 
+# Generate a default token and save it to oauth_tokens.txt
+generate_default_token() {
+    echo "Generating default OAuth token..."
+    local default_token=$(python3 -c "import jwt; from datetime import datetime, timedelta; print(jwt.encode({'exp': datetime.utcnow() + timedelta(minutes=30), 'iat': datetime.utcnow(), 'sub': 'default_user'}, 'supersecretkey', algorithm='HS256'))")
+    echo "$default_token" > "$SETUP_DIR/oauth_tokens.txt"
+    echo "Default OAuth token generated and saved to $SETUP_DIR/oauth_tokens.txt"
+}
+
+generate_default_token
+
 # Create main Python script
 cat > "$SETUP_DIR/main.py" << 'EOL'
 import logging
