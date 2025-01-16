@@ -183,4 +183,4 @@ fi
 # Start the Python server directly
 echo "Starting the LLM server..."
 source "$SETUP_DIR/venv/bin/activate"
-exec python3 "$SETUP_DIR/main.py"
+exec uvicorn main:app --host 0.0.0.0 --port 22542
