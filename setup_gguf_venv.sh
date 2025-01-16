@@ -51,6 +51,12 @@ if [ ! -f qwen2.5-3b-instruct-q8_0.gguf ]; then
     wget https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q8_0.gguf
 fi
 
+# Remove existing virtual environment if it exists
+echo "Cleaning up existing virtual environment..."
+if [ -d "$SETUP_DIR/venv" ]; then
+    rm -rf "$SETUP_DIR/venv"
+fi
+
 # Create Python virtual environment
 echo "Creating Python virtual environment..."
 python3 -m venv "$SETUP_DIR/venv"
