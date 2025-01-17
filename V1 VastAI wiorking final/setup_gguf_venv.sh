@@ -155,15 +155,6 @@ if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
 fi
 
-# Ensure no existing process is using port 8082
-echo "Checking for processes using port 8082..."
-if lsof -i:8082 > /dev/null; then
-    echo "Killing existing process on port 8082..."
-    lsof -i:8082 -t | xargs kill -9 || echo "Failed to kill process. Please check manually."
-else
-    echo "No process is using port 8082."
-fi
-
 # Start the Python server using nohup
 echo "Starting the LLM server..."
 nohup bash -c "cd $SETUP_DIR && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8082" > "$SETUP_DIR/logs/server.log" 2>&1 &
