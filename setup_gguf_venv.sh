@@ -76,13 +76,12 @@ generate_default_token() {
     echo "Generating default OAuth token..."
     local default_token=$(python3 -c "
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime
 SECRET_KEY = 'SmartTasks'
 ALGORITHM = 'HS256'
 payload = {'iat': datetime.utcnow(), 'sub': 'default_user'}
 token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-print(token)
-")
+print(token)")
     if [ -z "$default_token" ]; then
         echo "Failed to generate token"
         exit 1
@@ -180,3 +179,17 @@ fi
 # Start the Python server using nohup
 echo "Starting the LLM server..."
 nohup bash -c "cd $SETUP_DIR && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8082" > "$SETUP_DIR/logs/server.log" 2>&1 &
+
+# Create GPU monitoring script
+GPU_MONITOR_SCRIPT="$SETUP_DIR/gpu_monitor.sh"
+cat > "$GPU_MONITOR_SCRIPT" << 'EOS'
+#!/bin/bash
+LOG_FILE="/app/llm-setup/logs/gpu_monitor.log"
+echo "Starting GPU monitoring at $(date)" > $LOG_FILE
+while true; do
+    nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.free,memory.total --format=csv,noheader >> $LOG_FILE
+    sleep 10
+done
+EOS
+chmod +x "$GPU_MONITOR_SCRIPT"
+echo "GPU monitoring script created at $GPU_MONITOR_SCRIPT. You can run it separately."
