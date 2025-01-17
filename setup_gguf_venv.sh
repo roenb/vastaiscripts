@@ -138,7 +138,6 @@ class GenerateRequest(BaseModel):
     repetition_penalty: Optional[float] = 1.0  # No penalty by default
     stop_tokens: Optional[List[str]] = None    # Custom stop tokens
     presence_penalty: Optional[float] = None   # Encourage new tokens
-    frequency_penalty: Optional[float] = None  # Penalize token repetition
     triggers: Optional[List[str]] = None       # Custom control triggers
 
 
@@ -173,7 +172,6 @@ async def generate_text(query: GenerateRequest, token: str = Depends(verify_toke
             temperature=query.temperature,
             top_p=query.top_p,
             top_k=query.top_k,
-            repetition_penalty=query.repetition_penalty,
             stop=query.stop_tokens or ["</s>", "Human:", "Assistant:"],  # Default stops
             echo=False
         )
