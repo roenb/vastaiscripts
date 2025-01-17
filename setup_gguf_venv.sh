@@ -155,10 +155,16 @@ if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
 fi
 
-# Start the Python server
+# Start the Python server using nohup
 echo "Starting the LLM server..."
-cd "$SETUP_DIR"
-export PYTHONPATH="/app/llm-setup"
-source "$SETUP_DIR/venv/bin/activate"
-echo "Current working directory: $(pwd)"
-exec uvicorn main:app --host 0.0.0.0 --port 22542 > "$SETUP_DIR/logs/server.log" 2>&1
+nohup bash -c "source $SETUP_DIR/venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8082" > "$SETUP_DIR/logs/server.log" 2>&1 &
+
+# Check if the application is running on the desired port
+echo "Checking if the application is running on port 8082..."
+sleep 2
+if lsof -i:8082 > /dev/null; then
+    echo "Application is running on port 8082."
+    echo "Logs are available at $SETUP_DIR/logs/server.log"
+else
+    echo "Application is NOT running on port 8082. Check the logs at $SETUP_DIR/logs/server.log for errors."
+fi
