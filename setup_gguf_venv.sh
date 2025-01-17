@@ -22,7 +22,7 @@ fi
 # Install required packages
 echo "Installing required packages..."
 apt-get update
-apt-get install -y python3-pip python3-venv wget lsof || { echo "Package installation failed"; exit 1; }
+apt-get install -y python3-pip python3-venv wget lsof logrotate || { echo "Package installation failed"; exit 1; }
 
 # Detect system specs for optimization
 GPU_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n 1)  # Total VRAM in MB
@@ -69,7 +69,7 @@ source "$SETUP_DIR/venv/bin/activate"
 
 # Install Python dependencies
 pip install --upgrade pip
-pip install fastapi uvicorn pydantic llama-cpp-python pyjwt python-dotenv || { echo "Failed to install dependencies"; exit 1; }
+pip install fastapi uvicorn pydantic llama-cpp-python pyjwt python-dotenv cProfile || { echo "Failed to install dependencies"; exit 1; }
 
 # Generate a default token and save it to oauth_tokens.txt
 generate_default_token() {
@@ -96,13 +96,13 @@ cat > "$SETUP_DIR/main.py" << 'EOL'
 import logging
 import os
 from fastapi import FastAPI, HTTPException, Depends, Header
-from pydantic import BaseModel
 from llama_cpp import Llama
 from dotenv import load_dotenv
 import jwt
 from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel
+import cProfile
 
 # Load environment variables
 load_dotenv("/app/llm-setup/.env")
@@ -140,61 +140,26 @@ class GenerateRequest(BaseModel):
     presence_penalty: Optional[float] = None   # Encourage new tokens
     triggers: Optional[List[str]] = None       # Custom control triggers
 
-
-def save_token(token):
-    with open(TOKEN_FILE, "a") as file:
-        file.write(token.strip() + "\n")
-
-def verify_token(authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or malformed authorization header")
-    token = authorization.split("Bearer ")[1].strip()
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        with open(TOKEN_FILE, "r") as file:
-            if token not in file.read().splitlines():
-                raise HTTPException(status_code=401, detail="Invalid token")
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
 @app.post("/generate")
-async def generate_text(query: GenerateRequest, token: str = Depends(verify_token)):
+async def generate_text(query: GenerateRequest):
+    profiler = cProfile.Profile()
+    profiler.enable()
     try:
         logging.info(f"Request received: {query}")
-        
-        # Pass the parameters to the model
         response = model(
             query.text,
             max_tokens=query.max_tokens,
             temperature=query.temperature,
             top_p=query.top_p,
             top_k=query.top_k,
-            stop=query.stop_tokens or ["</s>", "Human:", "Assistant:"],  # Default stops
-            echo=False
+            stop=query.stop_tokens or ["</s>", "Human:", "Assistant:"]
         )
-        
-        # Custom triggers processing (if applicable)
-        if query.triggers:
-            logging.info(f"Custom triggers provided: {query.triggers}")
-            # Process triggers dynamically if needed
-
+        profiler.disable()
+        profiler.print_stats(sort="cumtime")
         return {"response": response["choices"][0]["text"]}
     except Exception as e:
         logging.error(f"Error generating response: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/token")
-async def generate_token():
-    payload = {"iat": datetime.utcnow(), "sub": "user"}
-    if TOKEN_EXPIRATION_ENABLED:
-        payload["exp"] = datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRATION_MINUTES)
-    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    save_token(token)
-    return {"token": token}
 
 MODEL_PATH = "/app/llm-setup/models/qwen2.5-3b-instruct-q8_0.gguf"
 model = Llama(model_path=MODEL_PATH, n_threads=N_THREADS, n_batch=N_BATCH, n_ctx=N_CTX)
