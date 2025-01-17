@@ -69,7 +69,7 @@ source "$SETUP_DIR/venv/bin/activate"
 
 # Install Python dependencies
 pip install --upgrade pip
-pip install fastapi uvicorn pydantic llama-cpp-python pyjwt python-dotenv cProfile || { echo "Failed to install dependencies"; exit 1; }
+pip install fastapi uvicorn pydantic llama-cpp-python pyjwt python-dotenv || { echo "Failed to install dependencies"; exit 1; }
 
 # Generate a default token and save it to oauth_tokens.txt
 generate_default_token() {
