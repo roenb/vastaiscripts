@@ -74,7 +74,19 @@ pip install fastapi uvicorn pydantic llama-cpp-python pyjwt python-dotenv || { e
 # Generate a default token and save it to oauth_tokens.txt
 generate_default_token() {
     echo "Generating default OAuth token..."
-    local default_token=$(python3 -c "import jwt; print(jwt.encode({'iat': datetime.utcnow(), 'sub': 'default_user'}, 'SmartTasks', algorithm='HS256'))")
+    local default_token=$(python3 -c "
+import jwt
+from datetime import datetime, timedelta
+SECRET_KEY = 'SmartTasks'
+ALGORITHM = 'HS256'
+payload = {'iat': datetime.utcnow(), 'sub': 'default_user'}
+token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+print(token)
+")
+    if [ -z "$default_token" ]; then
+        echo "Failed to generate token"
+        exit 1
+    fi
     echo "$default_token" > "$SETUP_DIR/oauth_tokens.txt"
     echo "Default OAuth token generated and saved to $SETUP_DIR/oauth_tokens.txt"
 }
