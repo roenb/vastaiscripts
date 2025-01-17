@@ -73,7 +73,7 @@ if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
 # JWT Config
-SECRET_KEY = "supersecretkey"
+SECRET_KEY = "SmartTasks"
 ALGORITHM = "HS256"
 TOKEN_EXPIRATION_MINUTES = 30
 TOKEN_FILE = "/app/llm-setup/oauth_tokens.txt"
@@ -97,7 +97,7 @@ def verify_token(authorization: str = Header(None)):
         if os.path.exists(TOKEN_FILE):
             with open(TOKEN_FILE, "r") as file:
                 valid_tokens = [line.strip() for line in file.readlines()]
-                logging.info(f"Valid tokens: {valid_tokens}")
+                logging.info(f"Valid tokens from file: {valid_tokens}")
 
                 if token not in valid_tokens:
                     logging.warning("Token not found in oauth_tokens.txt")
@@ -114,6 +114,7 @@ def verify_token(authorization: str = Header(None)):
     except jwt.InvalidTokenError as e:
         logging.error(f"Invalid token error: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
+
 
 def create_token():
     expiration = datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRATION_MINUTES)
