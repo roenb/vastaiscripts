@@ -101,6 +101,8 @@ from llama_cpp import Llama
 from dotenv import load_dotenv
 import jwt
 from datetime import datetime, timedelta
+from typing import List, Optional
+from pydantic import BaseModel
 
 # Load environment variables
 load_dotenv("/app/llm-setup/.env")
@@ -127,6 +129,19 @@ logging.basicConfig(
 
 app = FastAPI()
 
+class GenerateRequest(BaseModel):
+    text: str
+    max_tokens: int = 512
+    temperature: float = 0.7
+    top_p: Optional[float] = 0.9  # Default: Nucleus Sampling
+    top_k: Optional[int] = 50     # Default: Top-k Sampling
+    repetition_penalty: Optional[float] = 1.0  # No penalty by default
+    stop_tokens: Optional[List[str]] = None    # Custom stop tokens
+    presence_penalty: Optional[float] = None   # Encourage new tokens
+    frequency_penalty: Optional[float] = None  # Penalize token repetition
+    triggers: Optional[List[str]] = None       # Custom control triggers
+
+
 def save_token(token):
     with open(TOKEN_FILE, "a") as file:
         file.write(token.strip() + "\n")
@@ -147,12 +162,32 @@ def verify_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/generate")
-async def generate_text(query: BaseModel, token: str = Depends(verify_token)):
+async def generate_text(query: GenerateRequest, token: str = Depends(verify_token)):
     try:
-        response = model(query.text, max_tokens=query.max_tokens, temperature=query.temperature)
+        logging.info(f"Request received: {query}")
+        
+        # Pass the parameters to the model
+        response = model(
+            query.text,
+            max_tokens=query.max_tokens,
+            temperature=query.temperature,
+            top_p=query.top_p,
+            top_k=query.top_k,
+            repetition_penalty=query.repetition_penalty,
+            stop=query.stop_tokens or ["</s>", "Human:", "Assistant:"],  # Default stops
+            echo=False
+        )
+        
+        # Custom triggers processing (if applicable)
+        if query.triggers:
+            logging.info(f"Custom triggers provided: {query.triggers}")
+            # Process triggers dynamically if needed
+
         return {"response": response["choices"][0]["text"]}
     except Exception as e:
+        logging.error(f"Error generating response: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/token")
 async def generate_token():
