@@ -19,10 +19,38 @@ if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
 fi
 
+
+# Determine system specs
+GPU_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n 1)  # Total VRAM in MB
+CPU_THREADS=$(lscpu | awk '/^CPU\(s\):/ {print $2}')  # Total CPU threads
+
+# Calculate settings dynamically
+N_THREADS=$((CPU_THREADS / 2))  # Use half of CPU threads for model processing
+N_BATCH=$((GPU_VRAM / 12))      # Approximation: Allocate ~12MB per batch unit
+N_CTX=1024                      # Default context size
+
+# Ensure reasonable values
+if [[ $N_THREADS -lt 1 ]]; then N_THREADS=1; fi
+if [[ $N_BATCH -lt 512 ]]; then N_BATCH=512; fi
+
+# Create .env file with calculated settings
+ENV_FILE="$SETUP_DIR/.env"
+echo "Creating .env file with calculated settings..."
+cat > "$ENV_FILE" <<EOL
+N_THREADS=$N_THREADS
+N_BATCH=$N_BATCH
+N_CTX=$N_CTX
+EOL
+
+echo ".env file created at $ENV_FILE with the following settings:"
+cat "$ENV_FILE"
+
+
+
 # Install required packages
 echo "Installing required packages..."
 apt-get update
-apt-get install -y python3-pip python3-venv wget || { echo "Package installation failed"; exit 1; }
+apt-get install -y python3-pip python3-venv wget lsof || { echo "Package installation failed"; exit 1; }
 
 # Download the Qwen model
 echo "Downloading Qwen 2.5 3B GGUF model..."
@@ -46,12 +74,12 @@ source "$SETUP_DIR/venv/bin/activate"
 
 # Install Python dependencies
 pip install --upgrade pip
-pip install fastapi uvicorn pydantic llama-cpp-python pyjwt || { echo "Failed to install dependencies"; exit 1; }
+pip install fastapi uvicorn pydantic llama-cpp-python pyjwt python-dotenv || { echo "Failed to install dependencies"; exit 1; }
 
 # Generate a default token and save it to oauth_tokens.txt
 generate_default_token() {
     echo "Generating default OAuth token..."
-    local default_token=$(python3 -c "import jwt; from datetime import datetime, timedelta; print(jwt.encode({'exp': datetime.utcnow() + timedelta(minutes=30), 'iat': datetime.utcnow(), 'sub': 'default_user'}, 'supersecretkey', algorithm='HS256'))")
+    local default_token=$(python3 -c "import jwt; from datetime import datetime, timedelta; print(jwt.encode({'exp': datetime.utcnow() + timedelta(minutes=30), 'iat': datetime.utcnow(), 'sub': 'default_user'}, 'SmartTasks', algorithm='HS256'))")
     echo "$default_token" > "$SETUP_DIR/oauth_tokens.txt"
     echo "Default OAuth token generated and saved to $SETUP_DIR/oauth_tokens.txt"
 }
@@ -60,8 +88,9 @@ generate_default_token
 # Create main Python script
 cat > "$SETUP_DIR/main.py" << 'EOL'
 import logging
+from dotenv import load_dotenv
 import os
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
 from llama_cpp import Llama
 from datetime import datetime, timedelta
@@ -72,24 +101,61 @@ LOG_DIR = "/app/llm-setup/logs"
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
+# Load environment variables from .env file
+load_dotenv("/app/llm-setup/.env")
+
+# Fetch settings from environment
+n_threads = int(os.getenv("N_THREADS", 4))
+n_batch = int(os.getenv("N_BATCH", 512))
+n_ctx = int(os.getenv("N_CTX", 1024))
+
+# Log the loaded settings
+logging.info(f"Loaded settings: n_threads={n_threads}, n_batch={n_batch}, n_ctx={n_ctx}")
+
+
 # JWT Config
-SECRET_KEY = "supersecretkey"
+SECRET_KEY = "SmartTasks"
 ALGORITHM = "HS256"
 TOKEN_EXPIRATION_MINUTES = 30
 TOKEN_FILE = "/app/llm-setup/oauth_tokens.txt"
 
 def save_token(token):
     with open(TOKEN_FILE, "a") as file:
-        file.write(token + "\n")
+        file.write(token.strip() + "\n")
 
-def verify_token(token):
+def verify_token(authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        logging.error("Authorization header is missing or malformed")
+        raise HTTPException(status_code=401, detail="Missing or malformed authorization header")
+    token = authorization.split("Bearer ")[1].strip()
     try:
+        logging.info(f"Received token: {token}")
+        # Decode the token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        logging.info(f"Decoded payload: {payload}")
+
+        # Verify the token exists in the oauth_tokens.txt
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r") as file:
+                valid_tokens = [line.strip() for line in file.readlines()]
+                logging.info(f"Valid tokens from file: {valid_tokens}")
+
+                if token not in valid_tokens:
+                    logging.warning("Token not found in oauth_tokens.txt")
+                    raise HTTPException(status_code=401, detail="Invalid token")
+        else:
+            logging.error("oauth_tokens.txt file not found")
+            raise HTTPException(status_code=500, detail="Token file missing")
+
         return payload
+
     except jwt.ExpiredSignatureError:
+        logging.error("Token has expired")
         raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logging.error(f"Invalid token error: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
+
 
 def create_token():
     expiration = datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRATION_MINUTES)
@@ -115,9 +181,9 @@ if not os.path.exists(MODEL_PATH):
 try:
     model = Llama(
         model_path=MODEL_PATH,
-        n_threads=4,
-        n_batch=512,
-        n_ctx=2048
+        n_threads=n_threads,
+        n_batch=n_batch,
+        n_ctx=n_ctx
     )
     logging.info(f"Model loaded successfully from {MODEL_PATH}")
 except Exception as e:
@@ -131,6 +197,8 @@ class Query(BaseModel):
 
 @app.post("/generate")
 async def generate_text(query: Query, token: str = Depends(verify_token)):
+    logging.info("Received request at /generate")
+    logging.info(f"Request body: {query}")
     try:
         response = model(
             query.text,
@@ -153,6 +221,15 @@ EOL
 # Ensure correct permissions
 if [ "$EUID" -eq 0 ]; then
     chown -R $ACTUAL_USER:$ACTUAL_USER "$SETUP_DIR"
+fi
+
+# Ensure no existing process is using port 8082
+echo "Checking for processes using port 8082..."
+if lsof -i:8082 > /dev/null; then
+    echo "Killing existing process on port 8082..."
+    lsof -i:8082 -t | xargs kill -9 || echo "Failed to kill process. Please check manually."
+else
+    echo "No process is using port 8082."
 fi
 
 # Start the Python server using nohup
