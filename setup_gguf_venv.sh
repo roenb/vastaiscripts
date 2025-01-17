@@ -22,7 +22,7 @@ fi
 # Install required packages
 echo "Installing required packages..."
 apt-get update
-apt-get install -y python3-pip python3-venv wget || { echo "Package installation failed"; exit 1; }
+apt-get install -y python3-pip python3-venv wget lsof || { echo "Package installation failed"; exit 1; }
 
 # Download the Qwen model
 echo "Downloading Qwen 2.5 3B GGUF model..."
@@ -51,7 +51,7 @@ pip install fastapi uvicorn pydantic llama-cpp-python pyjwt || { echo "Failed to
 # Generate a default token and save it to oauth_tokens.txt
 generate_default_token() {
     echo "Generating default OAuth token..."
-    local default_token=$(python3 -c "import jwt; from datetime import datetime, timedelta; print(jwt.encode({'exp': datetime.utcnow() + timedelta(minutes=30), 'iat': datetime.utcnow(), 'sub': 'default_user'}, 'supersecretkey', algorithm='HS256'))")
+    local default_token=$(python3 -c "import jwt; from datetime import datetime, timedelta; print(jwt.encode({'exp': datetime.utcnow() + timedelta(minutes=30), 'iat': datetime.utcnow(), 'sub': 'default_user'}, 'SmartTasks', algorithm='HS256'))")
     echo "$default_token" > "$SETUP_DIR/oauth_tokens.txt"
     echo "Default OAuth token generated and saved to $SETUP_DIR/oauth_tokens.txt"
 }
@@ -61,7 +61,7 @@ generate_default_token
 cat > "$SETUP_DIR/main.py" << 'EOL'
 import logging
 import os
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
 from llama_cpp import Llama
 from datetime import datetime, timedelta
@@ -80,9 +80,13 @@ TOKEN_FILE = "/app/llm-setup/oauth_tokens.txt"
 
 def save_token(token):
     with open(TOKEN_FILE, "a") as file:
-        file.write(token + "\n")
+        file.write(token.strip() + "\n")
 
-def verify_token(token: str):
+def verify_token(authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        logging.error("Authorization header is missing or malformed")
+        raise HTTPException(status_code=401, detail="Missing or malformed authorization header")
+    token = authorization.split("Bearer ")[1].strip()
     try:
         logging.info(f"Received token: {token}")
         # Decode the token
@@ -92,7 +96,7 @@ def verify_token(token: str):
         # Verify the token exists in the oauth_tokens.txt
         if os.path.exists(TOKEN_FILE):
             with open(TOKEN_FILE, "r") as file:
-                valid_tokens = file.read().splitlines()
+                valid_tokens = [line.strip() for line in file.readlines()]
                 logging.info(f"Valid tokens: {valid_tokens}")
 
                 if token not in valid_tokens:
@@ -110,7 +114,6 @@ def verify_token(token: str):
     except jwt.InvalidTokenError as e:
         logging.error(f"Invalid token error: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
-
 
 def create_token():
     expiration = datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRATION_MINUTES)
@@ -152,6 +155,8 @@ class Query(BaseModel):
 
 @app.post("/generate")
 async def generate_text(query: Query, token: str = Depends(verify_token)):
+    logging.info("Received request at /generate")
+    logging.info(f"Request body: {query}")
     try:
         response = model(
             query.text,
