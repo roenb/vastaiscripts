@@ -82,14 +82,35 @@ def save_token(token):
     with open(TOKEN_FILE, "a") as file:
         file.write(token + "\n")
 
-def verify_token(token):
+def verify_token(token: str):
     try:
+        logging.info(f"Received token: {token}")
+        # Decode the token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        logging.info(f"Decoded payload: {payload}")
+
+        # Verify the token exists in the oauth_tokens.txt
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r") as file:
+                valid_tokens = file.read().splitlines()
+                logging.info(f"Valid tokens: {valid_tokens}")
+
+                if token not in valid_tokens:
+                    logging.warning("Token not found in oauth_tokens.txt")
+                    raise HTTPException(status_code=401, detail="Invalid token")
+        else:
+            logging.error("oauth_tokens.txt file not found")
+            raise HTTPException(status_code=500, detail="Token file missing")
+
         return payload
+
     except jwt.ExpiredSignatureError:
+        logging.error("Token has expired")
         raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logging.error(f"Invalid token error: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
+
 
 def create_token():
     expiration = datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRATION_MINUTES)
