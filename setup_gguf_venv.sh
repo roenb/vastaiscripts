@@ -157,7 +157,7 @@ fi
 
 # Start the Python server using nohup
 echo "Starting the LLM server..."
-nohup bash -c "source $SETUP_DIR/venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8082" > "$SETUP_DIR/logs/server.log" 2>&1 &
+nohup bash -c "cd $SETUP_DIR && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8082" > "$SETUP_DIR/logs/server.log" 2>&1 &
 
 # Check if the application is running on the desired port
 echo "Checking if the application is running on port 8082..."
